@@ -9,6 +9,15 @@ UUID UUIDNtoH(UUID uuid) {
 	return uuid;
 }
 
+Address GenerateAddress()
+{
+	UUID uuid;
+	auto r = UuidCreate(&uuid);
+	if (r != RPC_S_OK && r != RPC_S_UUID_LOCAL_ONLY)
+		throw std::runtime_error("蜡老茄 林家 积己 角菩");
+	return uuid;
+}
+
 UUID UUIDHtoN(UUID uuid) {
 
 	uuid.Data1 = htonl(uuid.Data1);

@@ -19,7 +19,7 @@ constexpr size_t temporary_buffer_size = 2048;
 class NetworkNode
 {
 private:
-	Socket listener;
+	std::shared_ptr<Socket> listener;
 	Router router;
 
 	void HandlePacket(Packet::PacketFrame* packet, std::shared_ptr<Socket>& ctx);
@@ -32,7 +32,8 @@ private:
 	concurrency::concurrent_queue<Packet::PacketFrame*> queue_relay;
 
 public:
-	NetworkNode();
+	NetworkNode() = delete;
+	NetworkNode(Address);
 	void Run(u_short port);
 	void Stop();
 

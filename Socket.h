@@ -1,5 +1,7 @@
 #pragma once
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
 #include <WinSock2.h>
+#include <memory>
 
 class Socket
 {
@@ -27,4 +29,4 @@ public:
 
 };
 
-void Listen(Socket& s, u_short port);
+void Listen(std::shared_ptr<Socket>& s, u_short port);

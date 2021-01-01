@@ -2,10 +2,12 @@
 #define WIN32_LEAN_AND_MEAN
 #include <rpc.h>
 #include <random>
+#include <stdexcept>
 
 using Address = UUID;
 UUID UUIDHtoN(UUID uuid);
 UUID UUIDNtoH(UUID uuid);
+Address GenerateAddress();
 
 constexpr Address addr_broadcast = Address{ 0,0,0,{0} };
 inline bool isBroadcast(const Address& addr)

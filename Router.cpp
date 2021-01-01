@@ -73,12 +73,17 @@ Address Router::GetMyAddress() const noexcept
 	return myAddress;
 }
 
-auto Router::GetConstIterator() const -> std::tuple<iter_type, iter_type>
+auto Router::GetConstIteratorBroadcast() const -> std::tuple<iter_type, iter_type>
 {
 	return std::tuple<iter_type, iter_type>{address_map.cbegin(), address_map.cend()};
 }
 
-std::weak_ptr<Socket> Router::Fetch(const Address& addr)
+auto Router::GetConstIteratorRoute() const -> std::tuple<iter_type2, iter_type2>
+{
+	return std::tuple<iter_type2, iter_type2>{route_map.cbegin(), route_map.cend()};
+}
+
+std::weak_ptr<Socket> Router::Fetch(const Address& addr) const
 {
 	auto it = route_map.find(addr);
 	if (it == route_map.end())

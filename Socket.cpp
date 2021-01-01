@@ -87,15 +87,19 @@ Socket::~Socket()
 	Close();
 }
 
-void Listen(Socket& s, u_short port)
+void Listen(std::shared_ptr<Socket>& s, u_short port)
 {
-	if (s.get() == INVALID_SOCKET)
+	if (s->get() == INVALID_SOCKET)
 		throw std::invalid_argument("사용할 소켓이 비정상적입니다");
 
 	sockaddr_in addr;
-	addr.sin_addr.s_addr = INADDR_ANY;
+	addr.sin_addr.s_addr = htonl(INADDR_ANY);
 	addr.sin_family = AF_INET;
 	addr.sin_port = htons(port);
-	bind(s.get(), reinterpret_cast<sockaddr*>(&addr), sizeof(sockaddr_in));
-	listen(s.get(), 5);
+
+	int optval = 1;
+	setsockopt(s->get(), SOL_SOCKET, SO_REUSEADDR, (char*)&optval, sizeof(optval));
+
+	bind(s->get(), reinterpret_cast<sockaddr*>(&addr), sizeof(sockaddr_in));
+	listen(s->get(), SOMAXCONN);
 }

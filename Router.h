@@ -21,14 +21,16 @@ class Router
 
 public:
 	using iter_type = typename std::unordered_map<Address, std::weak_ptr<Socket>>::const_iterator;
+	using iter_type2 = typename std::unordered_map<Address, RouteTable>::const_iterator;
 	Router(Address myAddress) : myAddress(myAddress) {}
 	void Register(Address& address, std::weak_ptr<Socket>&& ptr);
 	void Remove(std::shared_ptr<Socket>& ptr);
 	void RemoveAddress(const Address& addr);
 	Address GetMyAddress() const noexcept;
-	auto GetConstIterator() const -> std::tuple<iter_type, iter_type>;
+	auto GetConstIteratorBroadcast() const -> std::tuple<iter_type, iter_type>;
+	auto GetConstIteratorRoute() const -> std::tuple<iter_type2, iter_type2>;
 
-	std::weak_ptr<Socket> Fetch(const Address& addr);
+	std::weak_ptr<Socket> Fetch(const Address& addr) const;
 	void Update(Address next, Address dest, size_t hop);
 	void RefreshUsed();
 	bool isUsed(Address& addr) const;

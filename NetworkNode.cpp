@@ -1,6 +1,7 @@
 #include "NetworkNode.h"
+#include "IntervalTimer.h"
 
-NetworkNode::NetworkNode() : listener(INVALID_SOCKET), is_running(false), router(addr_broadcast)
+NetworkNode::NetworkNode(Address local) : listener(nullptr), is_running(false), router(local)
 {
 }
 
@@ -9,7 +10,7 @@ void NetworkNode::Run(u_short port)
 	if (is_running)
 		return;
 
-	listener = Socket();
+	listener = std::make_shared<Socket>();
 	Listen(listener, port);
 
 	auto r_proc = [](NetworkNode* node) {
@@ -33,20 +34,53 @@ void NetworkNode::Stop()
 		recv_thread.join();
 	if (relay_thread.joinable())
 		relay_thread.join();
+
+	while (!queue_relay.empty())
+	{
+		Packet::PacketFrame* pk;
+		if (queue_relay.try_pop(pk))
+		{
+			delete[] (char*)pk;
+		}
+	}
 }
 
 void NetworkNode::recv_proc()
 {
-	SequentArrayList<WSAEVENT, max_connection> events;
-	std::unordered_map<WSAEVENT, std::pair<std::shared_ptr<Socket>, size_t>> nodes; //heap
+	SequentArrayList<WSAEVENT, max_connection+1> events;
+	std::unordered_map<WSAEVENT, std::pair<std::shared_ptr<Socket>, size_t>> nodes;
 	RecyclerBuffer<temporary_buffer_size> buffers[max_connection];
 	SequentArrayList<size_t, max_connection> buffer_pool;
 	std::array<size_t, max_connection> build_length;
 	WSANETWORKEVENTS networkEvents;
 	DWORD idx;
 
+	for (size_t i = 0; i < max_connection; i++)
+		buffer_pool.push(i);
+	
+	memset(build_length.data(), 0, build_length.size() * sizeof(size_t));
+
+	{
+		WSAEVENT e = WSACreateEvent();
+		WSAEventSelect(listener->get(), e, FD_ACCEPT);
+		events.push(e);
+		nodes.insert(std::make_pair(e, make_pair(listener, max_connection)));
+	}
+
+	IntervalTimer timer(10);
 	while (is_running)
 	{
+		if (timer.IsPassed())
+		{
+			GenerateSignal();
+			auto [it, end] = router.GetConstIteratorRoute();
+			for (; it != end; ++it)
+			{
+				auto pt_ = Packet::Generate<Packet::RoutingPacket>(router.GetMyAddress(), it->first, it->second.first_hop+1);
+				RelayPacket(pt_);
+			}
+			timer.Reset();
+		}
 		idx = WSAWaitForMultipleEvents(events.size(), events.getArray(), FALSE, 1000, FALSE);
 		if (idx == WSA_WAIT_FAILED || idx == WSA_WAIT_TIMEOUT)
 			continue;
@@ -64,14 +98,21 @@ void NetworkNode::recv_proc()
 			int szAcp = sizeof(sockaddr_in);
 			SOCKET s = accept(st->get(), reinterpret_cast<sockaddr*>(&addr), &szAcp);
 			
-			//If is not full
-			WSAEVENT e = WSACreateEvent();
-			WSAEventSelect(s, e, FD_READ | FD_CLOSE);
-			events.push(e);
-			auto bidx = buffer_pool.at(0);
-			buffer_pool.pop(0);
+			if (nodes.size() <= max_connection)
+			{
+				WSAEVENT e = WSACreateEvent();
+				WSAEventSelect(s, e, FD_READ | FD_CLOSE);
+				events.push(e);
+				auto bidx = buffer_pool.at(0);
+				buffer_pool.pop(0);
 
-			nodes.insert(std::make_pair(e, std::make_pair(std::make_shared<Socket>(s), bidx)));
+				nodes.insert(std::make_pair(e, std::make_pair(std::make_shared<Socket>(s), bidx)));
+			}
+			else
+			{
+				closesocket(s);
+			}
+			
 		}
 
 		if (networkEvents.lNetworkEvents & FD_READ) {
@@ -86,7 +127,8 @@ void NetworkNode::recv_proc()
 			}
 			else
 			{
-				//버퍼 오버플로
+				//오버플로 오류
+				networkEvents.lNetworkEvents &= FD_CLOSE;
 			}
 
 			if (build_length[bidx] == 0 && buffer.Used() >= sizeof(long)) {
@@ -152,7 +194,7 @@ void NetworkNode::HandlePacket(Packet::PacketFrame* packet, std::shared_ptr<Sock
 			else
 			{
 				auto dp = reinterpret_cast<Packet::DataPacket*>(rp);
-				dp->dataLength();
+				printf("%d bytes msg: %s\n", dp->dataLength(), dp+sizeof(dp));
 			}
 			DESTROY_PACKET(packet);
 		}
@@ -198,9 +240,9 @@ void NetworkNode::relay_proc()
 			if (packet->to == addr_broadcast || pt->SubType == PRT_NEIGHBOUR_ROUTING)
 			{
 				std::lock_guard gd(lock_router);
-				auto [begin, end] = router.GetConstIterator();
+				auto [it, end] = router.GetConstIteratorBroadcast();
 				Encode(pt);
-				for (auto it = begin; it != end; ++it)
+				for (; it != end; ++it)
 				{
 					try {
 						auto ptr = it->second;
@@ -244,8 +286,11 @@ void NetworkNode::relay_proc()
 				}
 				catch (std::out_of_range e)
 				{
-					auto pt_ = Generate<ICMPPacket>(packet->to, packet->from, ICMP_NAREACH);
-					RelayPacket(pt_);
+					if (packet->from != router.GetMyAddress() && packet->to != router.GetMyAddress())
+					{
+						auto pt_ = Generate<ICMPPacket>(packet->to, packet->from, ICMP_NAREACH);
+						RelayPacket(pt_);
+					}
 					DESTROY_PACKET(packet);
 				}
 			}
