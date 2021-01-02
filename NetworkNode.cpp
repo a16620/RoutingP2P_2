@@ -12,6 +12,12 @@ NetworkNode::NetworkNode(Address local) : listener(nullptr), is_running(false), 
 {
 }
 
+NetworkNode::~NetworkNode()
+{
+	if (is_running)
+		Stop();
+}
+
 void NetworkNode::Run(u_short port)
 {
 	if (is_running)
@@ -53,13 +59,22 @@ void NetworkNode::Stop()
 		}
 	}
 
+	while (!outdata.empty())
+	{
+		Packet::DataPacket* pk;
+		if (outdata.try_pop(pk))
+		{
+			DESTROY_PACKET(pk);
+		}
+	}
+
 	for (int i = 0; i < events.size(); ++i)
 	{
 		WSACloseEvent(events.at(i));
 	}
 }
 
-void NetworkNode::PushCommand(Command&& cmd)
+void NetworkNode::PushCommand(Command& cmd)
 {
 	std::lock_guard lk(lock_queue_cmd);
 	queue_cmd.push(cmd);
@@ -200,13 +215,13 @@ void NetworkNode::Evt_Cmd(Command& cmd)
 {
 	switch (cmd.mode)
 	{
-	case 0:
+	case CMD_SEND:
 	{
 		auto dp = Packet::BuildDataPacket(router.GetMyAddress(), cmd.dinfo.address, (char*)cmd.dinfo.data, cmd.dinfo.length);
 		RelayPacket(dp);
 		break;
 	}
-	case 1:
+	case CMD_CONN:
 	{
 		Connect(cmd.ninfo.addr, cmd.ninfo.port);
 		break;

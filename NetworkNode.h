@@ -54,9 +54,10 @@ private:
 public:
 	NetworkNode() = delete;
 	NetworkNode(Address);
+	~NetworkNode();
 	void Run(u_short port);
 	void Stop();
-	void PushCommand(Command&&);
+	void PushCommand(Command&);
 
 	concurrency::concurrent_queue<Packet::DataPacket*> outdata;
 };
