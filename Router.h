@@ -22,7 +22,7 @@ class Router
 public:
 	using iter_type = typename std::unordered_map<Address, std::weak_ptr<Socket>>::const_iterator;
 	using iter_type2 = typename std::unordered_map<Address, RouteTable>::const_iterator;
-	Router(Address myAddress) : myAddress(myAddress) {}
+	Router(Address myAddress);
 	void Register(Address& address, std::weak_ptr<Socket>&& ptr);
 	void Remove(std::shared_ptr<Socket>& ptr);
 	void RemoveAddress(const Address& addr);

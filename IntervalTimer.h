@@ -14,6 +14,9 @@ public:
 	void Reset() {
 		start_ = ClockType::now();
 	}
+	void Set() {
+		start_ -= ClockType::duration(term);
+	}
 private:
 	ClockType::time_point start_{};
 	const long term;

@@ -5,6 +5,7 @@
 #include "Router.h"
 #include "Command.h"
 #include "StaticAlloc.h"
+#include "IntervalTimer.h"
 
 #include <set>
 #include <thread>
@@ -14,6 +15,7 @@
 #include <unordered_map>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 
 constexpr size_t max_connection = 3;
 constexpr size_t temporary_buffer_size = 2048;
@@ -23,13 +25,14 @@ class NetworkNode
 private:
 	using connection_info = std::pair<std::shared_ptr<Socket>, size_t>;
 	std::shared_ptr<Socket> listener;
+	IntervalTimer signalTimer, commandTimer;
 
 	SequentArrayList<WSAEVENT, max_connection + 1> events;
 	std::unordered_map<WSAEVENT, connection_info> nodes;
 	SequentArrayList<size_t, max_connection> buffer_pool;
 
 	Router router;
-	std::mutex lock_router;
+	std::shared_mutex lock_router;
 	concurrency::concurrent_queue<Packet::PacketFrame*> queue_relay;
 
 	void Evt_Connected(SOCKET s);
@@ -41,6 +44,8 @@ private:
 	void HandlePacket(Packet::PacketFrame* packet, std::shared_ptr<Socket>& ctx);
 	void RelayPacket(Packet::PacketFrame* packet);
 	void GenerateSignal();
+
+	void TemporaryLog(const std::string& msg);
 
 	bool is_running;
 	std::thread recv_thread, relay_thread;

@@ -7,6 +7,11 @@ inline bool equal_ptr(std::shared_ptr<T>& lhs, std::weak_ptr<T>& rhs)
 	return !lhs.owner_before(rhs) && !rhs.owner_before(lhs);
 }
 
+Router::Router(Address myAddress) : myAddress(myAddress)
+{
+	Update(myAddress, myAddress, 0);
+}
+
 void Router::Register(Address& address, std::weak_ptr<Socket>&& ptr)
 {
 	if (used.count(address))
@@ -112,11 +117,18 @@ void Router::Update(Address next, Address dest, size_t hop)
 		auto& tb = it->second;
 		if (tb.first_hop > hop)
 		{
-			tb.second = tb.first;
-			tb.second_hop = tb.first_hop;
-			tb.first = next;
-			tb.first_hop = hop;
-			tb.size = 2;
+			if (tb.first == next)
+			{
+				tb.first_hop = hop;
+			}
+			else
+			{
+				tb.second = tb.first;
+				tb.second_hop = tb.first_hop;
+				tb.first = next;
+				tb.first_hop = hop;
+				tb.size = 2;
+			}
 		}
 		else if (tb.size == 2)
 		{
@@ -126,7 +138,7 @@ void Router::Update(Address next, Address dest, size_t hop)
 				tb.second_hop = hop;
 			}
 		}
-		else
+		else if (tb.first != next)
 		{
 			tb.second = next;
 			tb.second_hop = hop;

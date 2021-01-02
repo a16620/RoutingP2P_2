@@ -2,7 +2,9 @@
 
 enum {
 	CMD_CONN,
-	CMD_SEND
+	CMD_SEND,
+	CMD_FETCH_ADDR,
+	CMD_QUERY
 };
 
 struct DataInfo {
@@ -16,10 +18,15 @@ struct NodeInfo {
 	USHORT port;
 };
 
+struct QueryInfo {
+	Address address;
+};
+
 struct Command {
 	union {
 		DataInfo dinfo;
 		NodeInfo ninfo;
+		QueryInfo qinfo;
 	};
 	UINT mode;
 };

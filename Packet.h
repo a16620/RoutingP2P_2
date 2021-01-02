@@ -14,7 +14,8 @@ namespace Packet {
 	enum {
 		ICMP_NAREACH,
 		ICMP_INFORM_ADDR,
-		ICMP_TRAFFIC_INFO
+		ICMP_TRAFFIC_INFO,
+		ICMP_RESET_TIMER
 	};
 
 	struct PacketFrame {

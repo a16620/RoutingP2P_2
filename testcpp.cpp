@@ -40,14 +40,18 @@ int main()
 			cmd_.dinfo = DataInfo{addr_to, (uintptr_t)data, length};
 			node.PushCommand(cmd_);
 		}
-		else if (cmd == "data")
+		else if (cmd == "noti")
 		{
 			while (!node.outdata.empty())
 			{
 				Packet::DataPacket* dp;
 				if (node.outdata.try_pop(dp))
 				{
-					printf("%d바이트 내용: %s\n", dp->dataLength(), dp + sizeof(Packet::DataPacket));
+					RPC_CSTR dd;
+					UuidToStringA(&dp->from, &dd);
+					cout << "발신자: " << dd;
+					RpcStringFreeA(&dd);
+					printf(" %d바이트 내용:\n%s\n", dp->dataLength(), (char*)dp + sizeof(Packet::DataPacket));
 					DESTROY_PACKET(dp);
 				}
 			}
@@ -68,6 +72,23 @@ int main()
 			auto cmd_ = Command();
 			cmd_.mode = CMD_CONN;
 			cmd_.ninfo = NodeInfo{ target, port };
+			node.PushCommand(cmd_);
+		}
+		else if (cmd == "addrs")
+		{
+			auto cmd_ = Command();
+			cmd_.mode = CMD_FETCH_ADDR;
+			node.PushCommand(cmd_);
+		}
+		else if (cmd == "qry")
+		{
+			auto cmd_ = Command();
+			cmd_.mode = CMD_QUERY;
+			cout << "주소: ";
+			cin >> cmd;
+			Address addr_to;
+			UuidFromStringA((RPC_CSTR)(cmd.c_str()), &addr_to);
+			cmd_.qinfo.address = addr_to;
 			node.PushCommand(cmd_);
 		}
 		else if (cmd == "exit")

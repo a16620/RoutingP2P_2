@@ -6,8 +6,6 @@ Packet::PacketFrame* Packet::Encode(PacketFrame* packet)
 	if (packet->SubType >= PRT_TRANSMITION)
 	{
 		auto ptr = reinterpret_cast<Packet::TransmitionPacket*>(packet);
-		ptr->to = UUIDHtoN(ptr->to);
-		ptr->from = UUIDHtoN(ptr->from);
 		if (packet->SubType == PRT_TRANSMITION_ICMP)
 		{
 			auto ptr2 = reinterpret_cast<Packet::ICMPPacket*>(packet);
@@ -17,8 +15,6 @@ Packet::PacketFrame* Packet::Encode(PacketFrame* packet)
 	else
 	{
 		auto ptr = reinterpret_cast<Packet::RoutingPacket*>(packet);
-		ptr->next = UUIDHtoN(ptr->next);
-		ptr->dest = UUIDHtoN(ptr->dest);
 		ptr->hop = htonl(ptr->hop);
 	}
 	packet->payload_length = htonl(packet->payload_length);
@@ -42,8 +38,6 @@ Packet::PacketFrame* Packet::Decode(PacketFrame* packet)
 	if (packet->SubType >= PRT_TRANSMITION)
 	{
 		auto ptr = reinterpret_cast<Packet::TransmitionPacket*>(packet);
-		ptr->to = UUIDNtoH(ptr->to);
-		ptr->from = UUIDNtoH(ptr->from);
 		if (packet->SubType == PRT_TRANSMITION_ICMP)
 		{
 			auto ptr2 = reinterpret_cast<Packet::ICMPPacket*>(packet);
@@ -53,8 +47,6 @@ Packet::PacketFrame* Packet::Decode(PacketFrame* packet)
 	else
 	{
 		auto ptr = reinterpret_cast<Packet::RoutingPacket*>(packet);
-		ptr->next = UUIDNtoH(ptr->next);
-		ptr->dest = UUIDNtoH(ptr->dest);
 		ptr->hop = ntohl(ptr->hop);
 	}
 	return packet;

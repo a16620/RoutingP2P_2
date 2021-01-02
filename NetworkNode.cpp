@@ -1,14 +1,14 @@
 #include "NetworkNode.h"
-#include "IntervalTimer.h"
+#include <string>
 
 void SendTemporaryPacketBySocket(Packet::PacketFrame* packet, std::shared_ptr<Socket>& s)
 {
 	auto payload_length = packet->payload_length;
-	s->SendCompletly(reinterpret_cast<char*>(Packet::Encode(packet)), sizeof(Packet::PacketFrame) + payload_length);
+	SendWithLength(s, reinterpret_cast<char*>(Packet::Encode(packet)), sizeof(Packet::PacketFrame) + payload_length);
 	DESTROY_PACKET(packet);
 }
 
-NetworkNode::NetworkNode(Address local) : listener(nullptr), is_running(false), router(local)
+NetworkNode::NetworkNode(Address local) : listener(nullptr), is_running(false), router(local), signalTimer(30), commandTimer(3)
 {
 }
 
@@ -89,7 +89,7 @@ void NetworkNode::recv_proc()
 
 	memset(build_length.data(), 0, build_length.size() * sizeof(u_long));
 
-	IntervalTimer signalTimer(30), commandTimer(3);
+	
 	while (is_running)
 	{
 		if (commandTimer.IsPassed())
@@ -150,9 +150,9 @@ void NetworkNode::recv_proc()
 			}
 
 			if (build_length[bidx] == 0 && buffer.Used() >= sizeof(u_long)) {
-				std::array<char, 4> cBuffer;
-				buffer.poll(cBuffer.data(), 4);
-				build_length[bidx] = ntohl(*reinterpret_cast<u_long*>(cBuffer.data()));
+				u_long cBuffer = 0;
+				buffer.poll(reinterpret_cast<char*>(&cBuffer), sizeof(u_long));
+				build_length[bidx] = ntohl(cBuffer);
 			}
 
 			if (build_length[bidx] != 0 && buffer.Used() >= build_length[bidx]) {
@@ -168,7 +168,7 @@ void NetworkNode::recv_proc()
 		if (networkEvents.lNetworkEvents & FD_CLOSE) {
 			buffers[bidx].Clear();
 			build_length[bidx] = 0;
-
+			events.pop(idx);
 			Evt_Close(evt, node_);
 		}
 	}
@@ -187,6 +187,8 @@ void NetworkNode::Evt_Connected(SOCKET s)
 		auto ss = std::make_shared<Socket>(s);
 		nodes.insert(std::make_pair(e, std::make_pair(ss, bidx)));
 		SendTemporaryPacketBySocket(Packet::Generate<Packet::ICMPPacket>(router.GetMyAddress(), addr_broadcast, Packet::ICMP_INFORM_ADDR), ss);
+		signalTimer.Set();
+		TemporaryLog("연결됨");
 	}
 	else
 	{
@@ -224,6 +226,27 @@ void NetworkNode::Evt_Cmd(Command& cmd)
 	case CMD_CONN:
 	{
 		Connect(cmd.ninfo.addr, cmd.ninfo.port);
+		break;
+	}
+	case CMD_FETCH_ADDR:
+	{
+		std::string returns;
+		std::shared_lock lk(lock_router);
+		auto [it, end] = router.GetConstIteratorRoute();
+		for (; it != end; ++it)
+		{
+			returns += to_string(it->first);
+			returns += '/';
+			returns += std::to_string(it->second.first_hop);
+			returns += "hop\n";
+		}
+		TemporaryLog(returns);
+		break;
+	}
+	case CMD_QUERY:
+	{
+		auto ip = Packet::Generate<Packet::ICMPPacket>(router.GetMyAddress(), cmd.qinfo.address, Packet::ICMP_RESET_TIMER);
+		RelayPacket(ip);
 		break;
 	}
 	}
@@ -269,7 +292,7 @@ void NetworkNode::HandlePacket(Packet::PacketFrame* packet, std::shared_ptr<Sock
 			if (ip->flag == ICMP_NAREACH && !router.isUsed(ip->from))
 			{
 				{
-					std::lock_guard gd(lock_router);
+					std::unique_lock gd(lock_router);
 					router.RemoveAddress(ip->from);
 				}
 				RelayPacket(Generate<ICMPPacket>(ip->from, addr_broadcast, ICMP_NAREACH));
@@ -281,22 +304,37 @@ void NetworkNode::HandlePacket(Packet::PacketFrame* packet, std::shared_ptr<Sock
 			if (rp->SubType == PRT_TRANSMITION_ICMP)
 			{
 				auto ip = reinterpret_cast<ICMPPacket*>(rp);
-				if (ip->flag == ICMP_INFORM_ADDR)
+				switch (ip->flag)
+				{
+				case ICMP_INFORM_ADDR:
 				{
 					std::lock_guard gd(lock_router);
 					router.Register(ip->from, ctx);
+					break;
 				}
-				else if (ip->flag == ICMP_TRAFFIC_INFO)
+				case ICMP_RESET_TIMER:
+				{
+					signalTimer.Set();
+					break;
+				}
+				case ICMP_TRAFFIC_INFO:
 				{
 					//TODO
+					break;
 				}
+				case ICMP_NAREACH:
+				{
+					TemporaryLog(to_string(ip->from)+"으로 전송 실패");
+					break;
+				}
+				}
+				DESTROY_PACKET(packet);
 			}
 			else
 			{
 				auto dp = reinterpret_cast<DataPacket*>(rp);
 				Evt_DataLoaded(dp);
 			}
-			DESTROY_PACKET(packet);
 		}
 		else
 		{
@@ -306,9 +344,9 @@ void NetworkNode::HandlePacket(Packet::PacketFrame* packet, std::shared_ptr<Sock
 	else
 	{
 		auto rp = reinterpret_cast<RoutingPacket*>(packet);
-		lock_router.lock();
+		std::unique_lock lk(lock_router);
 		router.Update(rp->next, rp->dest, rp->hop);
-		lock_router.unlock();
+		lk.unlock();
 		DESTROY_PACKET(packet);
 	}
 }
@@ -325,6 +363,12 @@ void NetworkNode::GenerateSignal()
 	RelayPacket(pt_);
 }
 
+void NetworkNode::TemporaryLog(const std::string& msg)
+{
+	auto notifi = Packet::BuildDataPacket(router.GetMyAddress(), addr_broadcast, msg.c_str(), msg.length() + 1);
+	outdata.push((Packet::DataPacket*)notifi);
+}
+
 void NetworkNode::relay_proc()
 {
 	using namespace Packet;
@@ -338,7 +382,7 @@ void NetworkNode::relay_proc()
 			auto payload_length = packet->payload_length;
 			if (packet->to == addr_broadcast || pt->SubType == PRT_NEIGHBOUR_ROUTING)
 			{
-				lock_router.lock();
+				std::shared_lock lk(lock_router);
 				auto [it, end] = router.GetConstIteratorBroadcast();
 				Encode(pt);
 				for (; it != end; ++it)
@@ -356,7 +400,7 @@ void NetworkNode::relay_proc()
 
 					}
 				}
-				lock_router.unlock();
+				lk.unlock();
 				DESTROY_PACKET(packet);
 				continue;
 			}
@@ -365,7 +409,7 @@ void NetworkNode::relay_proc()
 				try {
 					std::weak_ptr<Socket> ptr;
 					{
-						std::lock_guard gd(lock_router);
+						std::shared_lock lk(lock_router);
 						ptr = router.Fetch(packet->to);
 					}
 					if (!ptr.expired())
@@ -386,6 +430,7 @@ void NetworkNode::relay_proc()
 				}
 				catch (std::out_of_range e)
 				{
+					Decode(packet);
 					if (packet->from != router.GetMyAddress() && packet->to != router.GetMyAddress())
 					{
 						auto pt_ = Generate<ICMPPacket>(packet->to, packet->from, ICMP_NAREACH);
