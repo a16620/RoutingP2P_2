@@ -52,6 +52,28 @@ int main()
 				}
 			}
 		}
+		else if (cmd == "con")
+		{
+			cout << "주소: ";
+			cin >> cmd;
+			ULONG target;
+			if (cmd == "loopback" || cmd == "localhost" || cmd == " ")
+				target = INADDR_LOOPBACK;
+			else
+				target = inet_addr(cmd.c_str());
+			cout << "포트: ";
+			USHORT port;
+			cin >> port;
+
+			auto cmd_ = Command();
+			cmd_.mode = CMD_CONN;
+			cmd_.ninfo = NodeInfo{ target, port };
+			node.PushCommand(cmd_);
+		}
+		else if (cmd == "exit")
+		{
+			break;
+		}
 		else
 		{
 			cout << "..." << endl;
