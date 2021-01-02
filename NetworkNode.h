@@ -3,12 +3,14 @@
 #include "Buffer.h"
 #include "Packet.h"
 #include "Router.h"
-
+#include "Command.h"
 #include "StaticAlloc.h"
+
 #include <set>
 #include <thread>
 #include <array>
 #include <concurrent_queue.h>
+#include <queue>
 #include <unordered_map>
 #include <memory>
 #include <mutex>
@@ -33,7 +35,7 @@ private:
 	void Evt_Connected(SOCKET s);
 	void Evt_Close(WSAEVENT evt, connection_info& info);
 	void Evt_DataLoaded(Packet::DataPacket* dataPacket);
-	void Evt_Cmd();
+	void Evt_Cmd(Command& cmd);
 
 	bool Connect(ULONG addr, u_short port);
 	void HandlePacket(Packet::PacketFrame* packet, std::shared_ptr<Socket>& ctx);
@@ -43,15 +45,20 @@ private:
 	bool is_running;
 	std::thread recv_thread, relay_thread;
 	
+	std::queue<Command> queue_cmd;
+	std::mutex lock_queue_cmd;
 
+	//실행 금지
+	void recv_proc();
+	void relay_proc();
 public:
 	NetworkNode() = delete;
 	NetworkNode(Address);
 	void Run(u_short port);
 	void Stop();
+	void PushCommand(Command&&);
 
-	void recv_proc();
-	void relay_proc();
+	concurrency::concurrent_queue<Packet::DataPacket*> outdata;
 };
 
 void SendWithLength(std::shared_ptr<Socket>& s, const char* buffer, size_t length);

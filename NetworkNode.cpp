@@ -30,17 +30,9 @@ void NetworkNode::Run(u_short port)
 		nodes.insert(std::make_pair(e, make_pair(listener, max_connection)));
 	}
 
-	auto r_proc = [](NetworkNode* node) {
-		node->recv_proc();
-	};
-
-	auto w_proc = [](NetworkNode* node) {
-		node->relay_proc();
-	};
-
 	is_running = true;
-	recv_thread = std::thread(r_proc, this);
-	relay_thread = std::thread(w_proc, this);
+	recv_thread = std::thread(&NetworkNode::recv_proc, this);
+	relay_thread = std::thread(&NetworkNode::relay_proc, this);
 }
 
 void NetworkNode::Stop()
@@ -67,6 +59,12 @@ void NetworkNode::Stop()
 	}
 }
 
+void NetworkNode::PushCommand(Command&& cmd)
+{
+	std::lock_guard lk(lock_queue_cmd);
+	queue_cmd.push(cmd);
+}
+
 void NetworkNode::recv_proc()
 {
 	RecyclerBuffer<temporary_buffer_size> buffers[max_connection];
@@ -81,7 +79,15 @@ void NetworkNode::recv_proc()
 	{
 		if (commandTimer.IsPassed())
 		{
-			
+			if (!queue_cmd.empty())
+			{
+				auto cmd = queue_cmd.front();
+				Evt_Cmd(cmd);
+				lock_queue_cmd.lock();
+				queue_cmd.pop();
+				lock_queue_cmd.unlock();
+			}
+			commandTimer.Reset();
 		}
 		if (signalTimer.IsPassed())
 		{
@@ -124,7 +130,7 @@ void NetworkNode::recv_proc()
 			}
 			else
 			{
-				//오버플로 오류
+				//TODO 오버플로 오류/ 로그남기기
 				networkEvents.lNetworkEvents &= FD_CLOSE;
 			}
 
@@ -187,13 +193,31 @@ void NetworkNode::Evt_Close(WSAEVENT evt, connection_info& info)
 
 void NetworkNode::Evt_DataLoaded(Packet::DataPacket* dataPacket)
 {
-	printf("%d bytes msg: %s\n", dataPacket->dataLength(), dataPacket + sizeof(Packet::DataPacket));
+	outdata.push(dataPacket);
+}
+
+void NetworkNode::Evt_Cmd(Command& cmd)
+{
+	switch (cmd.mode)
+	{
+	case 0:
+	{
+		auto dp = Packet::BuildDataPacket(router.GetMyAddress(), cmd.dinfo.address, (char*)cmd.dinfo.data, cmd.dinfo.length);
+		RelayPacket(dp);
+		break;
+	}
+	case 1:
+	{
+		Connect(cmd.ninfo.addr, cmd.ninfo.port);
+		break;
+	}
+	}
 }
 
 bool NetworkNode::Connect(ULONG addr, u_short port)
 {
 	if (nodes.size() > max_connection)
-		return;
+		return false;
 
 	sockaddr_in tar;
 	tar.sin_family = AF_INET;
@@ -249,7 +273,7 @@ void NetworkNode::HandlePacket(Packet::PacketFrame* packet, std::shared_ptr<Sock
 				}
 				else if (ip->flag == ICMP_TRAFFIC_INFO)
 				{
-
+					//TODO
 				}
 			}
 			else
