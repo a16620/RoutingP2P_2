@@ -57,8 +57,8 @@ int main()
 			cout << "주소: ";
 			cin >> cmd;
 			ULONG target;
-			if (cmd == "loopback" || cmd == "localhost" || cmd == " ")
-				target = INADDR_LOOPBACK;
+			if (cmd == "loopback" || cmd == "localhost" || cmd == "n")
+				target = htonl(INADDR_LOOPBACK);
 			else
 				target = inet_addr(cmd.c_str());
 			cout << "포트: ";

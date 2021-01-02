@@ -156,11 +156,11 @@ void NetworkNode::recv_proc()
 			}
 
 			if (build_length[bidx] != 0 && buffer.Used() >= build_length[bidx]) {
-				std::array<char, temporary_buffer_size> packetBuffer;
-				buffer.poll(packetBuffer.data(), build_length[bidx]);
+				char* packetBuffer = new char[build_length[bidx]];
+				buffer.poll(packetBuffer, build_length[bidx]);
 				build_length[bidx] = 0;
 
-				auto packet = Packet::Decode(reinterpret_cast<Packet::PacketFrame*>(packetBuffer.data()));
+				auto packet = Packet::Decode(reinterpret_cast<Packet::PacketFrame*>(packetBuffer));
 				HandlePacket(packet, st);
 			}
 		}
