@@ -1,6 +1,13 @@
 #include "NetworkNode.h"
 #include "IntervalTimer.h"
 
+void SendTemporaryPacketBySocket(Packet::PacketFrame* packet, std::shared_ptr<Socket>& s)
+{
+	auto payload_length = packet->payload_length;
+	s->SendCompletly(reinterpret_cast<char*>(Packet::Encode(packet)), sizeof(Packet::PacketFrame) + payload_length);
+	DESTROY_PACKET(packet);
+}
+
 NetworkNode::NetworkNode(Address local) : listener(nullptr), is_running(false), router(local)
 {
 }
@@ -12,6 +19,16 @@ void NetworkNode::Run(u_short port)
 
 	listener = std::make_shared<Socket>();
 	Listen(listener, port);
+
+	for (size_t i = 0; i < max_connection; i++)
+		buffer_pool.push(i);
+
+	{
+		WSAEVENT e = WSACreateEvent();
+		WSAEventSelect(listener->get(), e, FD_ACCEPT);
+		events.push(e);
+		nodes.insert(std::make_pair(e, make_pair(listener, max_connection)));
+	}
 
 	auto r_proc = [](NetworkNode* node) {
 		node->recv_proc();
@@ -40,37 +57,33 @@ void NetworkNode::Stop()
 		Packet::PacketFrame* pk;
 		if (queue_relay.try_pop(pk))
 		{
-			delete[] (char*)pk;
+			DESTROY_PACKET(pk);
 		}
+	}
+
+	for (int i = 0; i < events.size(); ++i)
+	{
+		WSACloseEvent(events.at(i));
 	}
 }
 
 void NetworkNode::recv_proc()
 {
-	SequentArrayList<WSAEVENT, max_connection+1> events;
-	std::unordered_map<WSAEVENT, std::pair<std::shared_ptr<Socket>, size_t>> nodes;
 	RecyclerBuffer<temporary_buffer_size> buffers[max_connection];
-	SequentArrayList<size_t, max_connection> buffer_pool;
-	std::array<size_t, max_connection> build_length;
+	std::array<u_long, max_connection> build_length;
 	WSANETWORKEVENTS networkEvents;
 	DWORD idx;
 
-	for (size_t i = 0; i < max_connection; i++)
-		buffer_pool.push(i);
-	
-	memset(build_length.data(), 0, build_length.size() * sizeof(size_t));
+	memset(build_length.data(), 0, build_length.size() * sizeof(u_long));
 
-	{
-		WSAEVENT e = WSACreateEvent();
-		WSAEventSelect(listener->get(), e, FD_ACCEPT);
-		events.push(e);
-		nodes.insert(std::make_pair(e, make_pair(listener, max_connection)));
-	}
-
-	IntervalTimer timer(10);
+	IntervalTimer signalTimer(30), commandTimer(3);
 	while (is_running)
 	{
-		if (timer.IsPassed())
+		if (commandTimer.IsPassed())
+		{
+			
+		}
+		if (signalTimer.IsPassed())
 		{
 			GenerateSignal();
 			auto [it, end] = router.GetConstIteratorRoute();
@@ -79,7 +92,7 @@ void NetworkNode::recv_proc()
 				auto pt_ = Packet::Generate<Packet::RoutingPacket>(router.GetMyAddress(), it->first, it->second.first_hop+1);
 				RelayPacket(pt_);
 			}
-			timer.Reset();
+			signalTimer.Reset();
 		}
 		idx = WSAWaitForMultipleEvents(events.size(), events.getArray(), FALSE, 1000, FALSE);
 		if (idx == WSA_WAIT_FAILED || idx == WSA_WAIT_TIMEOUT)
@@ -87,32 +100,16 @@ void NetworkNode::recv_proc()
 
 		idx = idx - WSA_WAIT_EVENT_0;
 		auto evt = events.at(idx);
-		auto& st = nodes[evt].first;
-		auto bidx = nodes[evt].second;
+		auto& node_ = nodes[evt];
+		auto& st = node_.first;
+		auto bidx = node_.second;
 
 		if (WSAEnumNetworkEvents(st->get(), evt, &networkEvents) == SOCKET_ERROR)
 			continue;
 
 		if (networkEvents.lNetworkEvents & FD_ACCEPT) {
-			sockaddr_in addr;
-			int szAcp = sizeof(sockaddr_in);
-			SOCKET s = accept(st->get(), reinterpret_cast<sockaddr*>(&addr), &szAcp);
-			
-			if (nodes.size() <= max_connection)
-			{
-				WSAEVENT e = WSACreateEvent();
-				WSAEventSelect(s, e, FD_READ | FD_CLOSE);
-				events.push(e);
-				auto bidx = buffer_pool.at(0);
-				buffer_pool.pop(0);
-
-				nodes.insert(std::make_pair(e, std::make_pair(std::make_shared<Socket>(s), bidx)));
-			}
-			else
-			{
-				closesocket(s);
-			}
-			
+			auto s = AcceptNoAddress(st);
+			Evt_Connected(s);
 		}
 
 		if (networkEvents.lNetworkEvents & FD_READ) {
@@ -131,13 +128,13 @@ void NetworkNode::recv_proc()
 				networkEvents.lNetworkEvents &= FD_CLOSE;
 			}
 
-			if (build_length[bidx] == 0 && buffer.Used() >= sizeof(long)) {
+			if (build_length[bidx] == 0 && buffer.Used() >= sizeof(u_long)) {
 				std::array<char, 4> cBuffer;
 				buffer.poll(cBuffer.data(), 4);
 				build_length[bidx] = ntohl(*reinterpret_cast<u_long*>(cBuffer.data()));
 			}
 
-			if (build_length[bidx] != 0 && buffer.Used() >= (build_length[bidx] + 4)) {
+			if (build_length[bidx] != 0 && buffer.Used() >= build_length[bidx]) {
 				std::array<char, temporary_buffer_size> packetBuffer;
 				buffer.poll(packetBuffer.data(), build_length[bidx]);
 				build_length[bidx] = 0;
@@ -148,70 +145,133 @@ void NetworkNode::recv_proc()
 		}
 
 		if (networkEvents.lNetworkEvents & FD_CLOSE) {
-			auto bidx = nodes[evt].second;
 			buffers[bidx].Clear();
-			buffer_pool.push(bidx);
+			build_length[bidx] = 0;
 
-			{
-				auto ptr = nodes[evt].first;
-				std::lock_guard gd(lock_router);
-				router.Remove(ptr);
-			}
-			nodes.erase(evt);
+			Evt_Close(evt, node_);
 		}
 	}
 }
 
+void NetworkNode::Evt_Connected(SOCKET s)
+{
+	if (nodes.size() <= max_connection)
+	{
+		WSAEVENT e = WSACreateEvent();
+		WSAEventSelect(s, e, FD_READ | FD_CLOSE);
+		events.push(e);
+		auto bidx = buffer_pool.at(0);
+		buffer_pool.pop(0);
+
+		auto ss = std::make_shared<Socket>(s);
+		nodes.insert(std::make_pair(e, std::make_pair(ss, bidx)));
+		SendTemporaryPacketBySocket(Packet::Generate<Packet::ICMPPacket>(router.GetMyAddress(), addr_broadcast, Packet::ICMP_INFORM_ADDR), ss);
+	}
+	else
+	{
+		closesocket(s);
+	}
+}
+
+void NetworkNode::Evt_Close(WSAEVENT evt, connection_info& info)
+{
+	buffer_pool.push(info.second);
+	WSACloseEvent(evt);
+
+	{
+		std::lock_guard gd(lock_router);
+		router.Remove(info.first);
+	}
+	nodes.erase(evt);
+}
+
+void NetworkNode::Evt_DataLoaded(Packet::DataPacket* dataPacket)
+{
+	printf("%d bytes msg: %s\n", dataPacket->dataLength(), dataPacket + sizeof(Packet::DataPacket));
+}
+
+bool NetworkNode::Connect(ULONG addr, u_short port)
+{
+	if (nodes.size() > max_connection)
+		return;
+
+	sockaddr_in tar;
+	tar.sin_family = AF_INET;
+	tar.sin_port = htons(port);
+	tar.sin_addr.s_addr = addr;
+	auto s = make_tcp_socket();
+	int tried = 0;
+	do {
+		if (connect(s, reinterpret_cast<sockaddr*>(&tar), sizeof(sockaddr_in)) == 0)
+			break;
+		tried++;
+	}
+	while (tried < 3);
+
+	if (tried == 3)
+	{
+		closesocket(s);
+		return false;
+	}
+
+	Evt_Connected(s);
+	return true;
+}
+
 void NetworkNode::HandlePacket(Packet::PacketFrame* packet, std::shared_ptr<Socket>& ctx)
 {
-	if (packet->SubType >= Packet::PRT_TRANSMITION)
+	using namespace Packet;
+	if (packet->SubType >= PRT_TRANSMITION)
 	{
-		auto rp = reinterpret_cast<Packet::TransmitionPacket*>(packet);
-		if (rp->SubType == Packet::PRT_TRANSMITION_ICMP)
+		auto rp = reinterpret_cast<TransmitionPacket*>(packet);
+		if (rp->SubType == PRT_TRANSMITION_ICMP)
 		{
-			auto ip = reinterpret_cast<Packet::ICMPPacket*>(rp);
-			if (ip->flag == Packet::ICMP_NAREACH && !router.isUsed(ip->from))
+			auto ip = reinterpret_cast<ICMPPacket*>(rp);
+			if (ip->flag == ICMP_NAREACH && !router.isUsed(ip->from))
 			{
 				{
 					std::lock_guard gd(lock_router);
 					router.RemoveAddress(ip->from);
 				}
-				RelayPacket(Packet::Generate<Packet::ICMPPacket>(ip->from, addr_broadcast, Packet::ICMP_NAREACH));
+				RelayPacket(Generate<ICMPPacket>(ip->from, addr_broadcast, ICMP_NAREACH));
 			}
 		}
 
 		if (rp->to == router.GetMyAddress() || rp->to == addr_broadcast)
 		{
-			if (rp->SubType == Packet::PRT_TRANSMITION_ICMP)
+			if (rp->SubType == PRT_TRANSMITION_ICMP)
 			{
-				auto ip = reinterpret_cast<Packet::ICMPPacket*>(rp);
-				if (ip->flag == Packet::ICMP_INFORM_ADDR)
+				auto ip = reinterpret_cast<ICMPPacket*>(rp);
+				if (ip->flag == ICMP_INFORM_ADDR)
 				{
 					std::lock_guard gd(lock_router);
 					router.Register(ip->from, ctx);
 				}
+				else if (ip->flag == ICMP_TRAFFIC_INFO)
+				{
+
+				}
 			}
 			else
 			{
-				auto dp = reinterpret_cast<Packet::DataPacket*>(rp);
-				printf("%d bytes msg: %s\n", dp->dataLength(), dp+sizeof(dp));
+				auto dp = reinterpret_cast<DataPacket*>(rp);
+				Evt_DataLoaded(dp);
 			}
 			DESTROY_PACKET(packet);
 		}
 		else
 		{
-			RelayPacket(reinterpret_cast<Packet::TransmitionPacket*>(packet));
+			RelayPacket(reinterpret_cast<TransmitionPacket*>(packet));
 		}
 	}
 	else
 	{
-		auto rp = reinterpret_cast<Packet::RoutingPacket*>(packet);
+		auto rp = reinterpret_cast<RoutingPacket*>(packet);
 		lock_router.lock();
 		router.Update(rp->next, rp->dest, rp->hop);
 		lock_router.unlock();
 		DESTROY_PACKET(packet);
 	}
-	
 }
 
 void NetworkNode::RelayPacket(Packet::PacketFrame* packet)
@@ -239,7 +299,7 @@ void NetworkNode::relay_proc()
 			auto payload_length = packet->payload_length;
 			if (packet->to == addr_broadcast || pt->SubType == PRT_NEIGHBOUR_ROUTING)
 			{
-				std::lock_guard gd(lock_router);
+				lock_router.lock();
 				auto [it, end] = router.GetConstIteratorBroadcast();
 				Encode(pt);
 				for (; it != end; ++it)
@@ -249,7 +309,7 @@ void NetworkNode::relay_proc()
 						if (!ptr.expired())
 						{
 							auto p = ptr.lock();
-							p->SendCompletly(reinterpret_cast<char*>(packet), sizeof(PacketFrame) + payload_length);
+							SendWithLength(p, reinterpret_cast<char*>(packet), sizeof(PacketFrame) + payload_length);
 						}
 					}
 					catch (...)
@@ -257,6 +317,7 @@ void NetworkNode::relay_proc()
 
 					}
 				}
+				lock_router.unlock();
 				DESTROY_PACKET(packet);
 				continue;
 			}
@@ -272,7 +333,7 @@ void NetworkNode::relay_proc()
 					{
 						auto p = ptr.lock();
 						Encode(pt);
-						p->SendCompletly(reinterpret_cast<char*>(packet), sizeof(PacketFrame) + payload_length);
+						SendWithLength(p, reinterpret_cast<char*>(packet), sizeof(PacketFrame) + payload_length);
 						DESTROY_PACKET(packet);
 					}
 					else
@@ -300,4 +361,11 @@ void NetworkNode::relay_proc()
 			Sleep(100);
 		}
 	}
+}
+
+void SendWithLength(std::shared_ptr<Socket>& s, const char* buffer, size_t length)
+{
+	u_long len_ = htonl(length);
+	s->SendCompletly(reinterpret_cast<char*>(&len_), sizeof(u_long));
+	s->SendCompletly(buffer, length);
 }

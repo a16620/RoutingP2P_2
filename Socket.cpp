@@ -4,9 +4,7 @@
 
 Socket::Socket()
 {
-	sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-	if (sock == INVALID_SOCKET)
-		throw std::runtime_error("家南 积己 角菩");
+	sock = make_tcp_socket();
 }
 
 Socket::Socket(SOCKET s)
@@ -102,4 +100,24 @@ void Listen(std::shared_ptr<Socket>& s, u_short port)
 
 	bind(s->get(), reinterpret_cast<sockaddr*>(&addr), sizeof(sockaddr_in));
 	listen(s->get(), SOMAXCONN);
+}
+
+SOCKET AcceptNoAddress(std::shared_ptr<Socket>& s)
+{
+	sockaddr_in addr;
+	int szAcp = sizeof(sockaddr_in);
+	SOCKET ss = accept(s->get(), reinterpret_cast<sockaddr*>(&addr), &szAcp);
+	if (ss == INVALID_SOCKET)
+	{
+		throw std::runtime_error("家南 荐遏 角菩");
+	}
+	return ss;
+}
+
+SOCKET make_tcp_socket()
+{
+	auto sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	if (sock == INVALID_SOCKET)
+		throw std::runtime_error("家南 积己 角菩");
+	return sock;
 }

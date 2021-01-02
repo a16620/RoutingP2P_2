@@ -1,7 +1,7 @@
 #pragma once
 #include "Address.h"
 #include <memory>
-#define DESTROY_PACKET(pk) delete[] (pk)
+#define DESTROY_PACKET(pk) delete[] (char*)(pk)
 
 namespace Packet {
 	enum {
@@ -13,7 +13,8 @@ namespace Packet {
 
 	enum {
 		ICMP_NAREACH,
-		ICMP_INFORM_ADDR
+		ICMP_INFORM_ADDR,
+		ICMP_TRAFFIC_INFO
 	};
 
 	struct PacketFrame {

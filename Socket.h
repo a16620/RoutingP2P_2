@@ -30,3 +30,5 @@ public:
 };
 
 void Listen(std::shared_ptr<Socket>& s, u_short port);
+SOCKET AcceptNoAddress(std::shared_ptr<Socket>& s);
+SOCKET make_tcp_socket();
