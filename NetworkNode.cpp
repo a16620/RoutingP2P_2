@@ -8,7 +8,7 @@ void SendTemporaryPacketBySocket(Packet::PacketFrame* packet, std::shared_ptr<So
 	DESTROY_PACKET(packet);
 }
 
-NetworkNode::NetworkNode(Address local) : listener(nullptr), is_running(false), router(local), signalTimer(std::chrono::seconds(30)), commandTimer(std::chrono::seconds(30)), routingTimer(std::chrono::minutes(10))
+NetworkNode::NetworkNode(Address local) : listener(nullptr), is_running(false), router(local), signalTimer(std::chrono::seconds(30)), commandTimer(std::chrono::seconds(3)), routingTimer(std::chrono::minutes(10))
 {
 }
 
