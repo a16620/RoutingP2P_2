@@ -31,16 +31,13 @@ int main()
 			cin >> cmd;
 			Address addr_to;
 			UuidFromStringA((RPC_CSTR)(cmd.c_str()), &addr_to);
-			auto cmd_ = Command();
-			cmd_.mode = CMD_SEND;
 			cout << "Á¤º¸: ";
 			char data[512];
 			cin >> data;
 			auto length = strlen(data) + 1;
-			cmd_.dinfo = DataInfo{addr_to, (uintptr_t)data, length};
-			node.PushCommand(cmd_);
+			node.PushPost(addr_to, data, length);
 		}
-		else if (cmd == "noti")
+		else if (cmd == "daa")
 		{
 			while (!node.outdata.empty())
 			{

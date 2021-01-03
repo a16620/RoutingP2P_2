@@ -25,7 +25,7 @@ class NetworkNode
 private:
 	using connection_info = std::pair<std::shared_ptr<Socket>, size_t>;
 	std::shared_ptr<Socket> listener;
-	IntervalTimer signalTimer, commandTimer;
+	IntervalTimer signalTimer, commandTimer, routingTimer;
 
 	SequentArrayList<WSAEVENT, max_connection + 1> events;
 	std::unordered_map<WSAEVENT, connection_info> nodes;
@@ -63,6 +63,7 @@ public:
 	void Run(u_short port);
 	void Stop();
 	void PushCommand(Command&);
+	void PushPost(Address to, const char* data, size_t data_length);
 
 	concurrency::concurrent_queue<Packet::DataPacket*> outdata;
 };

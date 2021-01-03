@@ -20,7 +20,7 @@ void Router::Register(Address& address, std::weak_ptr<Socket>&& ptr)
 	address_map.insert(std::make_pair(address, ptr));
 }
 
-void Router::Remove(std::shared_ptr<Socket>& ptr)
+Address Router::Remove(std::shared_ptr<Socket>& ptr)
 {
 	Address t = addr_broadcast;
 	for (auto it = address_map.begin(); it != address_map.end(); ++it) {
@@ -33,6 +33,7 @@ void Router::Remove(std::shared_ptr<Socket>& ptr)
 
 	if (t != addr_broadcast)
 		RemoveAddress(t);
+	return t;
 }
 
 void Router::RemoveAddress(const Address& addr)

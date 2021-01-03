@@ -2,15 +2,8 @@
 
 enum {
 	CMD_CONN,
-	CMD_SEND,
 	CMD_FETCH_ADDR,
 	CMD_QUERY
-};
-
-struct DataInfo {
-	Address address;
-	uintptr_t data;
-	size_t length;
 };
 
 struct NodeInfo {
@@ -24,7 +17,6 @@ struct QueryInfo {
 
 struct Command {
 	union {
-		DataInfo dinfo;
 		NodeInfo ninfo;
 		QueryInfo qinfo;
 	};

@@ -24,7 +24,7 @@ public:
 	using iter_type2 = typename std::unordered_map<Address, RouteTable>::const_iterator;
 	Router(Address myAddress);
 	void Register(Address& address, std::weak_ptr<Socket>&& ptr);
-	void Remove(std::shared_ptr<Socket>& ptr);
+	Address Remove(std::shared_ptr<Socket>& ptr);
 	void RemoveAddress(const Address& addr);
 	Address GetMyAddress() const noexcept;
 	auto GetConstIteratorBroadcast() const -> std::tuple<iter_type, iter_type>;

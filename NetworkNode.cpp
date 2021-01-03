@@ -8,7 +8,7 @@ void SendTemporaryPacketBySocket(Packet::PacketFrame* packet, std::shared_ptr<So
 	DESTROY_PACKET(packet);
 }
 
-NetworkNode::NetworkNode(Address local) : listener(nullptr), is_running(false), router(local), signalTimer(30), commandTimer(3)
+NetworkNode::NetworkNode(Address local) : listener(nullptr), is_running(false), router(local), signalTimer(std::chrono::seconds(30)), commandTimer(std::chrono::seconds(30)), routingTimer(std::chrono::minutes(10))
 {
 }
 
@@ -80,6 +80,13 @@ void NetworkNode::PushCommand(Command& cmd)
 	queue_cmd.push(cmd);
 }
 
+void NetworkNode::PushPost(Address to, const char* data, size_t data_length)
+{
+	auto dp = Packet::BuildDataPacket(router.GetMyAddress(), to, data, data_length);
+	RelayPacket(dp);
+}
+
+
 void NetworkNode::recv_proc()
 {
 	RecyclerBuffer<temporary_buffer_size> buffers[max_connection];
@@ -114,6 +121,15 @@ void NetworkNode::recv_proc()
 				RelayPacket(pt_);
 			}
 			signalTimer.Reset();
+
+			if (routingTimer.IsPassed())
+			{
+				{
+					std::lock_guard lk(lock_router);
+					router.RefreshUsed();
+				}
+				routingTimer.Reset();
+			}
 		}
 		idx = WSAWaitForMultipleEvents(events.size(), events.getArray(), FALSE, 1000, FALSE);
 		if (idx == WSA_WAIT_FAILED || idx == WSA_WAIT_TIMEOUT)
@@ -201,11 +217,17 @@ void NetworkNode::Evt_Close(WSAEVENT evt, connection_info& info)
 	buffer_pool.push(info.second);
 	WSACloseEvent(evt);
 
+	Address ad;
 	{
 		std::lock_guard gd(lock_router);
-		router.Remove(info.first);
+		ad = router.Remove(info.first);
 	}
 	nodes.erase(evt);
+	if (ad != addr_broadcast)
+	{
+		using namespace Packet;
+		RelayPacket(Generate<ICMPPacket>(ad, addr_broadcast, ICMP_NAREACH));
+	}
 }
 
 void NetworkNode::Evt_DataLoaded(Packet::DataPacket* dataPacket)
@@ -217,12 +239,6 @@ void NetworkNode::Evt_Cmd(Command& cmd)
 {
 	switch (cmd.mode)
 	{
-	case CMD_SEND:
-	{
-		auto dp = Packet::BuildDataPacket(router.GetMyAddress(), cmd.dinfo.address, (char*)cmd.dinfo.data, cmd.dinfo.length);
-		RelayPacket(dp);
-		break;
-	}
 	case CMD_CONN:
 	{
 		Connect(cmd.ninfo.addr, cmd.ninfo.port);
@@ -315,6 +331,7 @@ void NetworkNode::HandlePacket(Packet::PacketFrame* packet, std::shared_ptr<Sock
 				case ICMP_RESET_TIMER:
 				{
 					signalTimer.Set();
+					routingTimer.Set();
 					break;
 				}
 				case ICMP_TRAFFIC_INFO:
